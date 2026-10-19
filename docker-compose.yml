@@ -1,0 +1,24 @@
+services:
+  esxi-mcp:
+    # Fertiges Image aus der GitHub Container Registry (per GitHub Actions bei jedem Push auf main gebaut)
+    image: ghcr.io/tabside/esxi-mcp:latest
+    pull_policy: always
+    container_name: esxi-mcp-cloud
+    restart: unless-stopped
+    environment:
+      - ESXI_HOST=${ESXI_HOST}
+      - ESXI_PORT=${ESXI_PORT:-443}
+      - ESXI_USER=${ESXI_USER}
+      - ESXI_PASSWORD=${ESXI_PASSWORD}
+      - ESXI_VERIFY_SSL=${ESXI_VERIFY_SSL:-true}
+      - ESXI_HTTP_PROXY=${ESXI_HTTP_PROXY:-}
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN}
+      - MCP_READONLY=${MCP_READONLY:-false}
+      - MCP_PROTECTED_VMS=${MCP_PROTECTED_VMS:-}
+      - MCP_MAX_MEMORY_MB=${MCP_MAX_MEMORY_MB:-}
+      - MCP_MAX_CPU=${MCP_MAX_CPU:-}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    ports:
+      # Zugriffskontrolle ist das Bearer-Token, TLS macht der Reverse-Proxy. Über MCP_BIND_ADDR einschränkbar.
+      - "${MCP_BIND_ADDR:-0.0.0.0}:${MCP_HOST_PORT:-8431}:8000"
