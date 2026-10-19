@@ -279,6 +279,26 @@ def _snapshot_tree(nodes, depth: int = 0) -> list[dict]:
     return out
 
 
+def _guest_filesystems(guest_disks) -> list[dict]:
+    """Dateisysteme im Gast (über VMware Tools). Bind-Mounts derselben Partition (z.B. CageFS)
+    melden identische Grösse/Freiplatz und werden zum kürzesten Pfad zusammengefasst."""
+    groups: dict = {}
+    for d in guest_disks or []:
+        key = (d.capacity, d.freeSpace, getattr(d, "filesystemType", None))
+        groups.setdefault(key, []).append(d.diskPath)
+    out = []
+    for (cap, free, fstype), paths in groups.items():
+        paths.sort(key=lambda p: (len(p), p))
+        entry = {
+            "pfad": paths[0], "typ": fstype, "groesse_gb": _gb(cap), "frei_gb": _gb(free),
+            "belegt_prozent": round(100 * (cap - free) / cap, 1) if cap else None,
+        }
+        if len(paths) > 1:
+            entry["weitere_mounts"] = len(paths) - 1
+        out.append(entry)
+    return sorted(out, key=lambda e: e["pfad"])
+
+
 def vm_info(vm: str) -> dict:
     """Details einer VM: Hardware, Hot-Add, Disks, Netzwerkkarten, Snapshots, Auslastung."""
     from pyVmomi import vim
@@ -308,7 +328,9 @@ def vm_info(vm: str) -> dict:
             "ram_hot_add": cfg.memoryHotAddEnabled if cfg else None,
             "cpu_hot_add": cfg.cpuHotAddEnabled if cfg else None,
             "ram_reservation_mb": cfg.memoryAllocation.reservation if cfg and cfg.memoryAllocation else None,
-            "disks": disks, "netzwerkkarten": nics,
+            "disks": disks,
+            "dateisysteme_gast": _guest_filesystems(guest.disk) if guest else [],
+            "netzwerkkarten": nics,
             "ips": [ip for n in (guest.net or []) for ip in (n.ipAddress or [])] if guest else [],
             "hostname_gast": guest.hostName if guest else None,
             "vmware_tools": {"status": guest.toolsRunningStatus, "version": guest.toolsVersionStatus2} if guest else None,
@@ -559,7 +581,7 @@ async def list_tools():
                  "name_filter": {"type": "string", "description": "Teil des VM-Namens"},
              }}),
         Tool(name="vm_info",
-             description="Details einer VM: Hardware, Hot-Add-Status, Disks, Netzwerkkarten, IPs, Snapshots, Auslastung (inkl. Ballooning/Swap).",
+             description="Details einer VM: Hardware, Hot-Add-Status, Disks, Belegung der Dateisysteme im Gast (braucht VMware Tools), Netzwerkkarten, IPs, Snapshots, Auslastung (inkl. Ballooning/Swap).",
              inputSchema={"type": "object", "properties": {"vm": _VM}, "required": ["vm"]}),
         Tool(name="snapshot_list", description="Snapshots einer VM mit Erstellzeit und Ebene im Snapshot-Baum.",
              inputSchema={"type": "object", "properties": {"vm": _VM}, "required": ["vm"]}),

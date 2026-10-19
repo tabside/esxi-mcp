@@ -24,7 +24,7 @@ Lesend:
 | `host_info` | Version, Hardware, CPU-/RAM-Auslastung, Uptime, Wartungsmodus (auch Verbindungstest) |
 | `datastore_list` | Datastores mit Kapazität, freiem Platz und Anzahl VMs |
 | `vm_list` | Alle VMs mit Power-Status, RAM, vCPU, Gast-OS, IP, VMware Tools, Auslastung |
-| `vm_info` | Details einer VM inkl. Hot-Add, Disks, Netzwerkkarten, IPs, Snapshots, Ballooning/Swap |
+| `vm_info` | Details einer VM inkl. Hot-Add, Disks, Belegung der Dateisysteme im Gast, Netzwerkkarten, IPs, Snapshots, Ballooning/Swap |
 | `snapshot_list` | Snapshots einer VM |
 | `task_list` | Zuletzt gelaufene Tasks mit Status und Fehler |
 | `event_list` | Ereignisse des Hosts, optional pro VM oder Zeitraum (An-/Abmeldungen standardmässig ausgeblendet) |

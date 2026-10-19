@@ -153,3 +153,14 @@ def test_main_refuses_short_token(monkeypatch):
 
 def test_no_delete_tools():
     assert not [t for t in em.TOOL_FUNCS if any(w in t for w in ("delete", "remove", "destroy", "revert"))]
+
+
+def test_guest_filesystems_merges_bind_mounts():
+    gb = 1024 ** 3
+    d = lambda p, cap, free: SimpleNamespace(diskPath=p, capacity=cap * gb, freeSpace=free * gb, filesystemType="xfs")
+    fs = em._guest_filesystems([d("/usr/share/cagefs-skeleton", 1000, 600), d("/", 1000, 600),
+                                d("/usr/share/cagefs-skeleton/lib", 1000, 600), d("/boot", 1, 0.5)])
+    assert [f["pfad"] for f in fs] == ["/", "/boot"]
+    assert fs[0]["weitere_mounts"] == 2 and fs[0]["belegt_prozent"] == 40.0
+    assert "weitere_mounts" not in fs[1]
+    assert em._guest_filesystems(None) == []
