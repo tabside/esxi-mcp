@@ -164,3 +164,10 @@ def test_guest_filesystems_merges_bind_mounts():
     assert fs[0]["weitere_mounts"] == 2 and fs[0]["belegt_prozent"] == 40.0
     assert "weitere_mounts" not in fs[1]
     assert em._guest_filesystems(None) == []
+
+
+def test_guest_filesystems_tolerates_small_free_drift():
+    gb = 1024 ** 3
+    d = lambda p, free: SimpleNamespace(diskPath=p, capacity=1000 * gb, freeSpace=free, filesystemType="xfs")
+    fs = em._guest_filesystems([d("/", 600 * gb), d("/a", 600 * gb - 4096), d("/b", 600 * gb + 8192), d("/data", 300 * gb)])
+    assert [(f["pfad"], f.get("weitere_mounts")) for f in fs] == [("/", 2), ("/data", None)]

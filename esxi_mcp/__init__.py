@@ -282,13 +282,19 @@ def _snapshot_tree(nodes, depth: int = 0) -> list[dict]:
 def _guest_filesystems(guest_disks) -> list[dict]:
     """Dateisysteme im Gast (über VMware Tools). Bind-Mounts derselben Partition (z.B. CageFS)
     melden identische Grösse/Freiplatz und werden zum kürzesten Pfad zusammengefasst."""
-    groups: dict = {}
-    for d in guest_disks or []:
-        key = (d.capacity, d.freeSpace, getattr(d, "filesystemType", None))
-        groups.setdefault(key, []).append(d.diskPath)
+    # Freiplatz wird pro Mount nacheinander gelesen und weicht darum leicht ab: gleiche Grösse und
+    # gleicher Typ, Freiplatz innerhalb 0.1 % der Grösse = dieselbe Partition.
+    groups: list = []  # [cap, free, fstype, [paths]]
+    for d in sorted(guest_disks or [], key=lambda x: (len(x.diskPath), x.diskPath)):
+        fstype = getattr(d, "filesystemType", None)
+        for g in groups:
+            if g[0] == d.capacity and g[2] == fstype and abs(g[1] - d.freeSpace) <= 0.001 * (d.capacity or 0):
+                g[3].append(d.diskPath)
+                break
+        else:
+            groups.append([d.capacity, d.freeSpace, fstype, [d.diskPath]])
     out = []
-    for (cap, free, fstype), paths in groups.items():
-        paths.sort(key=lambda p: (len(p), p))
+    for cap, free, fstype, paths in groups:
         entry = {
             "pfad": paths[0], "typ": fstype, "groesse_gb": _gb(cap), "frei_gb": _gb(free),
             "belegt_prozent": round(100 * (cap - free) / cap, 1) if cap else None,
