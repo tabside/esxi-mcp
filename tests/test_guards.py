@@ -171,3 +171,45 @@ def test_guest_filesystems_tolerates_small_free_drift():
     d = lambda p, free: SimpleNamespace(diskPath=p, capacity=1000 * gb, freeSpace=free, filesystemType="xfs")
     fs = em._guest_filesystems([d("/", 600 * gb), d("/a", 600 * gb - 4096), d("/b", 600 * gb + 8192), d("/data", 300 * gb)])
     assert [(f["pfad"], f.get("weitere_mounts")) for f in fs] == [("/", 2), ("/data", None)]
+
+
+@pytest.fixture
+def guest_vm(vm, monkeypatch):
+    vm.config.guestId = "debian12Guest"
+    vm.config.guestFullName = "Debian 12 (32-bit)"
+    monkeypatch.setattr(em, "_guest_os_options", lambda v: {
+        "debian12Guest": ("Debian 12 (32-bit)", "supported"),
+        "debian12_64Guest": ("Debian 12 (64-bit)", "supported"),
+        "debian6_64Guest": ("Debian 6 (64-bit)", "terminated"),
+    })
+    return vm
+
+
+def test_guest_os_running_vm_refused(guest_vm):
+    r = em.vm_set_guest_os("testvm", "debian12_64Guest", confirm=True)
+    assert r["nicht_moeglich"] and guest_vm.calls == []
+
+
+def test_guest_os_preview_and_run(guest_vm):
+    guest_vm.runtime.powerState = "poweredOff"
+    assert em.vm_set_guest_os("testvm", "debian12_64Guest")["vorschau"] is True and guest_vm.calls == []
+    em.vm_set_guest_os("testvm", "debian12_64Guest", confirm=True)
+    assert guest_vm.calls == ["ReconfigVM_Task", "Reload"]
+
+
+@pytest.mark.parametrize("gid, msg", [("windows99Guest", "nicht angeboten"), ("debian6_64Guest", "terminated")])
+def test_guest_os_invalid(guest_vm, gid, msg):
+    guest_vm.runtime.powerState = "poweredOff"
+    with pytest.raises(RuntimeError, match=msg):
+        em.vm_set_guest_os("testvm", gid, confirm=True)
+    assert guest_vm.calls == []
+
+
+def test_guest_os_readonly_and_protected(guest_vm, monkeypatch):
+    guest_vm.runtime.powerState = "poweredOff"
+    monkeypatch.setenv("MCP_PROTECTED_VMS", "testvm")
+    with pytest.raises(RuntimeError, match="geschützt"):
+        em.vm_set_guest_os("testvm", "debian12_64Guest", confirm=True)
+    monkeypatch.setenv("MCP_READONLY", "true")
+    with pytest.raises(RuntimeError, match="READONLY"):
+        em.vm_set_guest_os("testvm", "debian12_64Guest", confirm=True)

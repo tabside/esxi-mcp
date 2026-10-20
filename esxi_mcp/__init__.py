@@ -542,6 +542,52 @@ def vm_set_resources(vm: str, memory_mb: int = None, vcpu: int = None, snapshot:
         return result
 
 
+def _guest_os_options(v) -> dict:
+    """Vom Host für die Hardware-Version der VM unterstützte Gast-OS: {id: (name, supportLevel)}."""
+    opt = v.environmentBrowser.QueryConfigOption()
+    return {g.id: (g.fullName, g.supportLevel) for g in opt.guestOSDescriptor}
+
+
+def guest_os_list(vm: str, filter: str = None) -> list[dict]:
+    """Gast-OS-Typen, die der Host für diese VM (Hardware-Version) anbietet, optional gefiltert."""
+    with esxi() as si:
+        v = _find_vm(si, vm)
+        out = [{"guest_id": gid, "name": name, "support": level}
+               for gid, (name, level) in _guest_os_options(v).items()
+               if not filter or filter.lower() in gid.lower() or filter.lower() in (name or "").lower()]
+        return sorted(out, key=lambda g: g["name"] or "")
+
+
+def vm_set_guest_os(vm: str, guest_id: str, confirm: bool = False) -> dict:
+    """Gast-OS-Typ einer ausgeschalteten VM ändern. Ohne confirm=true nur Vorschau."""
+    from pyVmomi import vim
+    _require_write()
+    with esxi() as si:
+        v = _find_vm(si, vm)
+        _check_not_protected(v)
+        options = _guest_os_options(v)
+        current = v.config.guestId
+        preview = {"vm": v.name, "moid": v._moId, "power": v.runtime.powerState,
+                   "gast_os": {"jetzt": f"{current} ({options.get(current, ('?',))[0]})",
+                               "neu": f"{guest_id} ({options.get(guest_id, ('?',))[0]})"}}
+        if guest_id not in options:
+            raise RuntimeError(f"guest_id '{guest_id}' wird von diesem Host nicht angeboten - mit guest_os_list nachschauen")
+        if options[guest_id][1] in ("terminated", "deprecated"):
+            raise RuntimeError(f"guest_id '{guest_id}' ist auf diesem Host '{options[guest_id][1]}' und wird nicht gesetzt")
+        if guest_id == current:
+            return {**preview, "hinweis": "Keine Änderung nötig, Gast-OS ist bereits so gesetzt"}
+        if v.runtime.powerState != "poweredOff":
+            return {**preview, "nicht_moeglich": ["Gast-OS lässt sich nur bei ausgeschalteter VM ändern"],
+                    "hinweis": "VM zuerst herunterfahren (vm_power action=shutdown), dann erneut aufrufen"}
+        if not confirm:
+            return {**preview, "vorschau": True,
+                    "hinweis": "Zum Ausführen mit confirm=true erneut aufrufen (nur nach ausdrücklicher Bestätigung)"}
+        result = {**preview, "rekonfiguration": _wait(v.ReconfigVM_Task(spec=vim.vm.ConfigSpec(guestId=guest_id)))}
+        v.Reload()
+        result["ergebnis"] = {"guest_id": v.config.guestId, "name": v.config.guestFullName}
+        return result
+
+
 TOOL_FUNCS = {
     "get_version": get_version,
     "host_info": host_info,
@@ -554,9 +600,11 @@ TOOL_FUNCS = {
     "vm_power": vm_power,
     "vm_snapshot_create": vm_snapshot_create,
     "vm_set_resources": vm_set_resources,
+    "guest_os_list": guest_os_list,
+    "vm_set_guest_os": vm_set_guest_os,
 }
 
-WRITE_TOOLS = {"vm_power", "vm_snapshot_create", "vm_set_resources"}
+WRITE_TOOLS = {"vm_power", "vm_snapshot_create", "vm_set_resources", "vm_set_guest_os"}
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +666,14 @@ async def list_tools():
                  "vm": _VM, "memory_mb": {"type": "integer"}, "vcpu": {"type": "integer"},
                  "snapshot": {"type": "boolean", "default": True}, "confirm": _CONFIRM,
              }, "required": ["vm"]}),
+        Tool(name="guest_os_list",
+             description="Gast-OS-Typen (guest_id), die der Host für die Hardware-Version dieser VM anbietet, mit Support-Status. filter z.B. 'debian' oder 'windows'.",
+             inputSchema={"type": "object", "properties": {"vm": _VM, "filter": {"type": "string"}}, "required": ["vm"]}),
+        Tool(name="vm_set_guest_os",
+             description="SCHREIBEND: Gast-OS-Typ einer VM ändern (guest_id aus guest_os_list, z.B. debian12_64Guest). Nur bei ausgeschalteter VM. Ohne confirm=true nur Vorschau.",
+             inputSchema={"type": "object", "properties": {
+                 "vm": _VM, "guest_id": {"type": "string"}, "confirm": _CONFIRM,
+             }, "required": ["vm", "guest_id"]}),
     ]
 
 

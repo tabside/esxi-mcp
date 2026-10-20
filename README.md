@@ -28,6 +28,7 @@ Lesend:
 | `snapshot_list` | Snapshots einer VM |
 | `task_list` | Zuletzt gelaufene Tasks mit Status und Fehler |
 | `event_list` | Ereignisse des Hosts, optional pro VM oder Zeitraum (An-/Abmeldungen standardmässig ausgeblendet) |
+| `guest_os_list` | Gast-OS-Typen, die der Host für die Hardware-Version einer VM anbietet |
 
 Schreibend (alle mit Vorschau ohne `confirm`):
 
@@ -36,6 +37,7 @@ Schreibend (alle mit Vorschau ohne `confirm`):
 | `vm_power` | `on`, `off` (hart), `reset` (hart), `shutdown` / `reboot` (sauber, braucht VMware Tools) |
 | `vm_snapshot_create` | Snapshot erstellen, optional mit RAM-Zustand oder Quiesce |
 | `vm_set_resources` | RAM (`memory_mb`) und/oder vCPU ändern. Bei laufender VM nur Erhöhen mit aktivem Hot-Add, sonst vorher herunterfahren |
+| `vm_set_guest_os` | Gast-OS-Typ ändern (nur bei ausgeschalteter VM), mögliche Werte über `guest_os_list` |
 
 VMs werden per exaktem Namen (Gross/Klein egal) oder per MoID aus `vm_list` angegeben.
 
@@ -61,7 +63,7 @@ VMs werden per exaktem Namen (Gross/Klein egal) oder per MoID aus `vm_list` ange
 User (z.B. `mcp`) im Host Client unter Manage > Security & users > Users anlegen. Dann per SSH als root eine eigene Rolle anlegen und zuweisen (`esxcli system permission set` kennt nur die eingebauten Rollen, darum `vim-cmd`):
 
 ```bash
-vim-cmd vimsvc/auth/role_add MCP VirtualMachine.Config.Memory VirtualMachine.Config.CPUCount VirtualMachine.Interact.PowerOn VirtualMachine.Interact.PowerOff VirtualMachine.Interact.Reset VirtualMachine.State.CreateSnapshot
+vim-cmd vimsvc/auth/role_add MCP VirtualMachine.Config.Memory VirtualMachine.Config.CPUCount VirtualMachine.Interact.PowerOn VirtualMachine.Interact.PowerOff VirtualMachine.Interact.Reset VirtualMachine.State.CreateSnapshot VirtualMachine.Config.Settings
 vim-cmd vimsvc/auth/entity_permission_add vim.Folder:ha-folder-root mcp false MCP true
 esxcli system permission list
 ```
