@@ -151,8 +151,69 @@ def test_main_refuses_short_token(monkeypatch):
         em.main()
 
 
-def test_no_delete_tools():
-    assert not [t for t in em.TOOL_FUNCS if any(w in t for w in ("delete", "remove", "destroy", "revert"))]
+def test_only_snapshot_remove_deletes():
+    # Löschen nur für einzelne Snapshots, nie VMs/Disks, kein Zurücksetzen
+    deleting = [t for t in em.TOOL_FUNCS if any(w in t for w in ("delete", "remove", "destroy", "revert"))]
+    assert deleting == ["vm_snapshot_remove"]
+
+
+def _snap(name, moid, children=()):
+    snap = SimpleNamespace(_moId=moid, calls=[])
+    def remove(**kw):
+        snap.calls.append(kw)
+        return SimpleNamespace(info=SimpleNamespace(state="success"), _moId="task-r")
+    snap.RemoveSnapshot_Task = remove
+    return SimpleNamespace(name=name, description="", createTime=None, state="poweredOff",
+                           snapshot=snap, childSnapshotList=list(children))
+
+
+@pytest.fixture
+def snap_vm(vm, monkeypatch):
+    child = _snap("kind", "1-snapshot-2")
+    root = _snap("vor Update", "1-snapshot-1", [child])
+    dup1, dup2 = _snap("doppelt", "1-snapshot-3"), _snap("doppelt", "1-snapshot-4")
+    vm.snapshot = SimpleNamespace(rootSnapshotList=[root, dup1, dup2])
+    vm.runtime.consolidationNeeded = False
+    monkeypatch.setenv("MCP_ALLOW_DELETE", "true")
+    return vm, root, child
+
+
+def test_snapshot_remove_blocked_without_flag(snap_vm, monkeypatch):
+    monkeypatch.delenv("MCP_ALLOW_DELETE")
+    with pytest.raises(RuntimeError, match="MCP_ALLOW_DELETE"):
+        em.vm_snapshot_remove("testvm", "vor Update", confirm=True)
+
+
+def test_snapshot_remove_preview_then_run(snap_vm):
+    vm, root, child = snap_vm
+    r = em.vm_snapshot_remove("testvm", "vor Update")
+    assert r["vorschau"] is True and r["untergeordnete_bleiben"] == ["kind"] and root.snapshot.calls == []
+    em.vm_snapshot_remove("testvm", "vor Update", confirm=True)
+    assert root.snapshot.calls == [{"removeChildren": False, "consolidate": True}]
+    assert child.snapshot.calls == []
+
+
+def test_snapshot_remove_by_moid_and_child(snap_vm):
+    vm, root, child = snap_vm
+    em.vm_snapshot_remove("testvm", "1-snapshot-2", confirm=True)
+    assert child.snapshot.calls and root.snapshot.calls == []
+
+
+@pytest.mark.parametrize("name, msg", [("gibtsnicht", "nicht gefunden"), ("doppelt", "nicht eindeutig")])
+def test_snapshot_remove_bad_name(snap_vm, name, msg):
+    with pytest.raises(RuntimeError, match=msg):
+        em.vm_snapshot_remove("testvm", name, confirm=True)
+
+
+def test_snapshot_remove_protected_and_readonly(snap_vm, monkeypatch):
+    vm, root, _ = snap_vm
+    monkeypatch.setenv("MCP_PROTECTED_VMS", "testvm")
+    with pytest.raises(RuntimeError, match="geschützt"):
+        em.vm_snapshot_remove("testvm", "vor Update", confirm=True)
+    monkeypatch.setenv("MCP_READONLY", "true")
+    with pytest.raises(RuntimeError, match="READONLY"):
+        em.vm_snapshot_remove("testvm", "vor Update", confirm=True)
+    assert root.snapshot.calls == []
 
 
 def test_guest_filesystems_merges_bind_mounts():

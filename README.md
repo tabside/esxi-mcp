@@ -9,7 +9,8 @@ Schreibende Aktionen sind mehrfach gesichert:
 - VMs in `MCP_PROTECTED_VMS` sind für schreibende Tools gesperrt
 - `MCP_MAX_MEMORY_MB` / `MCP_MAX_CPU` begrenzen RAM/vCPU-Änderungen
 - vor RAM/vCPU-Änderungen wird standardmässig ein Snapshot erstellt
-- Löschen (VMs, Snapshots, Disks) und Snapshots zurücksetzen sind bewusst nicht implementiert
+- Snapshots löschen geht nur mit `MCP_ALLOW_DELETE=true` am Server, immer nur ein einzelner Snapshot
+- VMs oder Disks löschen und Snapshots zurücksetzen sind bewusst nicht implementiert
 - zusätzlich begrenzt die ESXi-Rolle des Users, was überhaupt geht
 
 Hinweis: Mit der kostenlosen ESXi-Lizenz ist die API nur lesend, schreibende Tools brauchen eine bezahlte Lizenz.
@@ -36,6 +37,7 @@ Schreibend (alle mit Vorschau ohne `confirm`):
 |------|--------------|
 | `vm_power` | `on`, `off` (hart), `reset` (hart), `shutdown` / `reboot` (sauber, braucht VMware Tools) |
 | `vm_snapshot_create` | Snapshot erstellen, optional mit RAM-Zustand oder Quiesce |
+| `vm_snapshot_remove` | Einzelnen Snapshot unwiderruflich löschen (Inhalt wird in die Disk übernommen, untergeordnete bleiben), nur mit `MCP_ALLOW_DELETE=true` |
 | `vm_set_resources` | RAM (`memory_mb`) und/oder vCPU ändern. Bei laufender VM nur Erhöhen mit aktivem Hot-Add, sonst vorher herunterfahren |
 | `vm_set_guest_os` | Gast-OS-Typ ändern (nur bei ausgeschalteter VM), mögliche Werte über `guest_os_list` |
 
@@ -53,6 +55,7 @@ VMs werden per exaktem Namen (Gross/Klein egal) oder per MoID aus `vm_list` ange
 | `ESXI_HTTP_PROXY` | nein | - | `host:port`, nur falls der Host nur über einen HTTP-Proxy erreichbar ist |
 | `MCP_AUTH_TOKEN` | ja | - | Statisches Bearer-Token (mind. 24 Zeichen), ohne startet der Server nicht |
 | `MCP_READONLY` | nein | `false` | `true` sperrt alle schreibenden Tools |
+| `MCP_ALLOW_DELETE` | nein | `false` | `true` erlaubt `vm_snapshot_remove` (zusätzlich `confirm=true` pro Aufruf) |
 | `MCP_PROTECTED_VMS` | nein | - | kommagetrennte VM-Namen oder MoIDs, die nicht verändert werden dürfen |
 | `MCP_MAX_MEMORY_MB` / `MCP_MAX_CPU` | nein | - | Obergrenzen für `vm_set_resources` |
 | `MCP_HOST` / `MCP_PORT` | nein | `0.0.0.0` / `8000` | Bind im Container |
@@ -63,7 +66,7 @@ VMs werden per exaktem Namen (Gross/Klein egal) oder per MoID aus `vm_list` ange
 User (z.B. `mcp`) im Host Client unter Manage > Security & users > Users anlegen. Dann per SSH als root eine eigene Rolle anlegen und zuweisen (`esxcli system permission set` kennt nur die eingebauten Rollen, darum `vim-cmd`):
 
 ```bash
-vim-cmd vimsvc/auth/role_add MCP VirtualMachine.Config.Memory VirtualMachine.Config.CPUCount VirtualMachine.Interact.PowerOn VirtualMachine.Interact.PowerOff VirtualMachine.Interact.Reset VirtualMachine.State.CreateSnapshot VirtualMachine.Config.Settings
+vim-cmd vimsvc/auth/role_add MCP VirtualMachine.Config.Memory VirtualMachine.Config.CPUCount VirtualMachine.Interact.PowerOn VirtualMachine.Interact.PowerOff VirtualMachine.Interact.Reset VirtualMachine.State.CreateSnapshot VirtualMachine.Config.Settings VirtualMachine.State.RemoveSnapshot
 vim-cmd vimsvc/auth/entity_permission_add vim.Folder:ha-folder-root mcp false MCP true
 esxcli system permission list
 ```

@@ -464,6 +464,43 @@ def vm_snapshot_create(vm: str, name: str, description: str = "", memory: bool =
         return {**preview, **_create_snapshot(v, name, description or "Erstellt über esxi-mcp", memory, quiesce)}
 
 
+def _snapshot_nodes(nodes):
+    for n in nodes or []:
+        yield n
+        yield from _snapshot_nodes(n.childSnapshotList)
+
+
+def vm_snapshot_remove(vm: str, snapshot: str, confirm: bool = False) -> dict:
+    """Einen einzelnen Snapshot UNWIDERRUFLICH löschen (Inhalt wird in die Disk übernommen, untergeordnete
+    Snapshots bleiben bestehen). Braucht MCP_ALLOW_DELETE=true. Ohne confirm=true nur Vorschau."""
+    _require_write()
+    if not _flag("MCP_ALLOW_DELETE"):
+        raise RuntimeError("Löschen ist gesperrt - am Server MCP_ALLOW_DELETE=true setzen")
+    with esxi() as si:
+        v = _find_vm(si, vm)
+        _check_not_protected(v)
+        nodes = list(_snapshot_nodes(v.snapshot.rootSnapshotList)) if v.snapshot else []
+        key = snapshot.strip()
+        hits = [n for n in nodes if n.snapshot._moId == key] or [n for n in nodes if n.name == key]
+        if not hits:
+            raise RuntimeError(f"Snapshot '{snapshot}' bei VM '{v.name}' nicht gefunden (Name oder moid aus snapshot_list)")
+        if len(hits) > 1:
+            raise RuntimeError(f"Snapshot-Name '{snapshot}' ist nicht eindeutig - moid verwenden: {[h.snapshot._moId for h in hits]}")
+        n = hits[0]
+        preview = {"vm": v.name, "moid": v._moId,
+                   "wuerde_loeschen": {"name": n.name, "moid": n.snapshot._moId, "erstellt": _ts(n.createTime),
+                                       "beschreibung": n.description},
+                   "untergeordnete_bleiben": [c.name for c in n.childSnapshotList or []]}
+        if not confirm:
+            return {**preview, "vorschau": True,
+                    "hinweis": "Zum Löschen mit confirm=true erneut aufrufen (nur nach ausdrücklicher Bestätigung genau dieses Snapshots)"}
+        result = {**preview, **_wait(n.snapshot.RemoveSnapshot_Task(removeChildren=False, consolidate=True), timeout=3600)}
+        v.Reload()
+        result["verbleibende_snapshots"] = [s["name"] for s in _snapshot_tree(v.snapshot.rootSnapshotList)] if v.snapshot else []
+        result["konsolidierung_noetig"] = v.runtime.consolidationNeeded
+        return result
+
+
 def vm_set_resources(vm: str, memory_mb: int = None, vcpu: int = None, snapshot: bool = True,
                      confirm: bool = False) -> dict:
     """RAM und/oder vCPU einer VM ändern. Bei laufender VM nur Erhöhen und nur mit aktivem Hot-Add,
@@ -599,12 +636,13 @@ TOOL_FUNCS = {
     "event_list": event_list,
     "vm_power": vm_power,
     "vm_snapshot_create": vm_snapshot_create,
+    "vm_snapshot_remove": vm_snapshot_remove,
     "vm_set_resources": vm_set_resources,
     "guest_os_list": guest_os_list,
     "vm_set_guest_os": vm_set_guest_os,
 }
 
-WRITE_TOOLS = {"vm_power", "vm_snapshot_create", "vm_set_resources", "vm_set_guest_os"}
+WRITE_TOOLS = {"vm_power", "vm_snapshot_create", "vm_snapshot_remove", "vm_set_resources", "vm_set_guest_os"}
 
 
 # ---------------------------------------------------------------------------
@@ -660,6 +698,12 @@ async def list_tools():
                  "memory": {"type": "boolean", "default": False}, "quiesce": {"type": "boolean", "default": False},
                  "confirm": _CONFIRM,
              }, "required": ["vm", "name"]}),
+        Tool(name="vm_snapshot_remove",
+             description="SCHREIBEND, UNWIDERRUFLICH: Einen einzelnen Snapshot einer VM löschen (Name oder moid aus snapshot_list). Der Inhalt wird in die Disk übernommen, untergeordnete Snapshots bleiben. Nur nutzbar mit MCP_ALLOW_DELETE=true am Server. Ohne confirm=true nur Vorschau; confirm=true nur setzen, nachdem der Benutzer das Löschen genau dieses Snapshots ausdrücklich bestätigt hat.",
+             inputSchema={"type": "object", "properties": {
+                 "vm": _VM, "snapshot": {"type": "string", "description": "Snapshot-Name oder moid aus snapshot_list"},
+                 "confirm": _CONFIRM,
+             }, "required": ["vm", "snapshot"]}),
         Tool(name="vm_set_resources",
              description="SCHREIBEND: RAM (memory_mb, z.B. 16384 = 16 GB) und/oder vCPU einer VM ändern. Bei laufender VM nur Erhöhen mit aktivem Hot-Add, sonst VM vorher herunterfahren. Legt vorher standardmässig einen Snapshot an. Ohne confirm=true nur Vorschau.",
              inputSchema={"type": "object", "properties": {
